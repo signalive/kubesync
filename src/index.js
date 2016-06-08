@@ -78,7 +78,10 @@ function init(folder) {
 
             return Promise.all(tasks);
         })
-        .catch(console.error.bind(console));
+        .catch((err) => {
+            console.error(err);
+            process.exit(1);
+        });
 }
 
 
