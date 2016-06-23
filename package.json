@@ -1,6 +1,6 @@
 {
   "name": "kubesync",
-  "version": "0.0.2",
+  "version": "0.1.0",
   "description": "kubesync is a small command line tool that makes it easy to deploy local config files (json and yaml) to ssh-proxied kubernetes cluster.",
   "bin": {
     "kubesync": "src/index.js"
