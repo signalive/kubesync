@@ -4,6 +4,19 @@ const _ = require('lodash');
 const rp = require('request-promise');
 
 
+/**
+ * Gets all pods.
+ * @return {Promise.<Array>}
+ */
+function getPods() {
+    return rp({
+            method: 'GET',
+            url: `${global.K8S_API_ROOT}/api/v1/pods`,
+            json: true
+        })
+        .then(result => result.items);
+}
+
 
 /**
  * Gets all replication controllers.
@@ -160,6 +173,7 @@ function deleteService(config) {
 }
 
 
+module.exports.getPods = getPods;
 module.exports.getRCs = getRCs;
 module.exports.createRC = createRC;
 module.exports.updateRC = updateRC;
