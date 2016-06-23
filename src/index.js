@@ -8,10 +8,13 @@ const rp = require('request-promise');
 const program = require('commander');
 const clor = require('clor');
 const pad = require('pad');
+const k8s = require('./k8s');
 
 
 global.K8S_API_ROOT = process.env.K8S_API_ROOT || 'http://127.0.0.1:8080';
-const k8s = require('./k8s');
+global.ENSURE_RETRY_INTERVAL = process.env.ENSURE_RETRY_INTERVAL || 5000;
+global.ENSURE_MAX_RETRY_COUNT = process.env.ENSURE_MAX_RETRY_COUNT || 60;
+let ensureRetryCount = 0;
 
 
 /**
@@ -48,6 +51,7 @@ program
     .version(require('../package.json').version)
     .usage('<folder> [options]')
     .option('-d, --dry-run', 'run the script without any changes on remote k8s for test purposes')
+    .option('-e, --ensure-all-pods-running', 'watch pods after execution and ensure all of them in `running` state')
     .action((folder) => {
         init(folder);
     })
@@ -147,6 +151,13 @@ function init(folder) {
 
             console.log(clor.bold('=> Executing plans...').string);
             return Promise.all(tasks);
+        })
+        .then(() => {
+            if (!program.ensureAllPodsRunning)
+                return;
+
+            console.log('\n' + clor.bold('=> Ensuring all the pods are running state...'));
+            return ensureAllPodsRunning();
         })
         .then(() => {
             console.log('\n' + clor.bold('=> Done'));
@@ -342,4 +353,32 @@ function performServiceStrategy(strategy) {
     }
 
     return Promise.resolve();
+}
+
+
+/**
+ * Ensures all the pods are in `running` state.
+ * @return {Promise}
+ */
+function ensureAllPodsRunning() {
+    if (ensureRetryCount == global.ENSURE_MAX_RETRY_COUNT)
+        return Promise.reject(new Error(`Ensure failed, max retry count reached`));
+
+    ensureRetryCount++;
+
+    return k8s
+        .getPods()
+        .then((pods) => {
+            const podsInRunningState = pods.filter(pod => pod.status.phase == 'Running');
+            console.log(clor.dim(`${podsInRunningState.length} of ${pods.length} pods are in running state`).string);
+
+            if (podsInRunningState.length == pods.length)
+                return;
+
+            return new Promise((resolve) => {
+                setTimeout(() => {
+                    resolve(ensureAllPodsRunning());
+                }, global.ENSURE_RETRY_INTERVAL);
+            });
+        });
 }
