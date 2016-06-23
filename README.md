@@ -27,11 +27,12 @@ ssh user@X.X.X.X -L 8080:127.0.0.1:8080
 ```
 Usage: kubesync <folder> [options]
 
-  Options:
+Options:
 
-    -h, --help     output usage information
-    -V, --version  output the version number
-    -d, --dry-run  run the script without any changes on remote k8s for test purposes
+  -h, --help                     output usage information
+  -V, --version                  output the version number
+  -d, --dry-run                  run the script without any changes on remote k8s for test purposes
+  -e, --ensure-all-pods-running  watch pods after execution and ensure all of them in `running` state
 ```
 
 ## Example
