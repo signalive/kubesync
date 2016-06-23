@@ -6,9 +6,11 @@ const fsp = require('fs-promise');
 const _ = require('lodash');
 const rp = require('request-promise');
 const program = require('commander');
+const clor = require('clor');
+const pad = require('pad');
 
 
-process.env.K8S_API_ROOT = 'http://127.0.0.1:8080';
+global.K8S_API_ROOT = process.env.K8S_API_ROOT || 'http://127.0.0.1:8080';
 const k8s = require('./k8s');
 
 
@@ -19,12 +21,23 @@ const k8s = require('./k8s');
  * UPDATE => There is a remote resource with same name and type, updates a resource.
  * NONE => Remote resource and local one is the same, does nothing.
  *
- * @type {Object}
+ * @enum {String}
  */
 const Strategies = {
     CREATE: 'create',
     UPDATE: 'update',
-    NONE: 'none'
+    NOOP: 'noop'
+};
+
+
+/**
+ * Strategy to console color mapping.
+ * @enum {String}
+ */
+const strategyColorMap = {
+    'create': 'green',
+    'update': 'yellow',
+    'noop': 'dim'
 };
 
 
@@ -48,35 +61,95 @@ if (!program.args.length)
  * Go baby, go.
  */
 function init(folder) {
-    console.log(`Fetching remote RCs and services from k8s...`);
-    return Promise.all([
+    console.log(clor.bold('=> Fetching remote RCs and services from k8s...').string);
+    console.log(clor.dim(`Kubernetes API: ${global.K8S_API_ROOT}`).string);
+
+    const plannedStrategies = {
+        rc: [],
+        svc: []
+    };
+
+    let results = [];
+
+    Promise.all([
             k8s.getRCs(),
-            k8s.getServices(),
-            readConfigFiles(folder)
+            k8s.getServices()
         ])
-        .then((results) => {
+        .then((results_) => {
+            results = results_;
+
+            console.log(clor.dim(`Fetched ${results[0].length} replication controllers and ${results[1].length} services`).string);
+            return readConfigFiles(folder);
+        })
+        .then((configs) => {
+            console.log(`\n${clor.bold('=> Determining strategies...')}`);
+
             const fetchedRCs = _.keyBy(results[0], 'metadata.name');
             const fetchedServices = _.keyBy(results[1], 'metadata.name');
-            const configs = results[2];
-            const tasks = [];
+
+            console.log(
+                clor.dim(pad('Name', 40, ' ')) +
+                clor.dim(pad('Type', 30, ' ')) +
+                clor.dim(pad('Strategy', 10, ' '))
+            );
+
+            console.log(
+                clor.dim(pad(40, ' ', '-')) +
+                clor.dim(pad(30, ' ', '-')) +
+                clor.dim(pad(10, ' ', '-'))
+            );
 
             if (_.isArray(configs.ReplicationController)) {
                 configs.ReplicationController.forEach((rc) => {
                     const strategy = compareRC(rc, fetchedRCs[rc.metadata.name]);
-                    const task = performRCStrategy(strategy);
-                    tasks.push(task);
+                    plannedStrategies.rc.push(strategy);
+
+                    const color = strategyColorMap[strategy.type];
+                    console.log(
+                        clor[color](pad(rc.metadata.name, 40, ' ')) +
+                        clor[color](pad('ReplicationController', 30, ' ')) +
+                        clor[color](pad(strategy.type, 10, ' '))
+                    );
                 });
             }
 
             if (_.isArray(configs.Service)) {
                 configs.Service.forEach((svc) => {
                     const strategy = compareService(svc, fetchedServices[svc.metadata.name]);
-                    const task = performServiceStrategy(strategy);
-                    tasks.push(task);
+                    plannedStrategies.rc.push(strategy);
+
+                    const color = strategyColorMap[strategy.type];
+                    console.log(
+                        clor[color](pad(svc.metadata.name, 40, ' ')) +
+                        clor[color](pad('Service', 30, ' ')) +
+                        clor[color](pad(strategy.type, 10, ' '))
+                    );
                 });
             }
+        })
+        .then(() => {
+            console.log('');
 
+            if (program.dryRun)
+                return console.log(clor.bold('=> No execution due to dry-run, skipping...').string);
+
+            const tasks = [].concat(
+                plannedStrategies.rc
+                    .filter(strategy => strategy.type != Strategies.NOOP)
+                    .map(strategy => performRCStrategy(strategy)),
+                plannedStrategies.svc
+                    .filter(strategy => strategy.type != Strategies.NOOP)
+                    .map(strategy => performServiceStrategy(strategy))
+            );
+
+            if (tasks.length == 0)
+                return console.log(clor.bold('=> No strategy to execute, skipping...').string);
+
+            console.log(clor.bold('=> Executing plans...').string);
             return Promise.all(tasks);
+        })
+        .then(() => {
+            console.log('\n' + clor.bold('=> Done'));
         })
         .catch((err) => {
             console.error(err);
@@ -100,13 +173,13 @@ function init(folder) {
  * @return {Promise.<Object>}
  */
 function readConfigFiles(opt_path) {
-    console.log(`Scanning for configuration files...`);
+    console.log(`\n${clor.bold('=> Scanning for configuration files...')}`);
 
     return fsp
         .walk(_.isString(opt_path) ? opt_path : '.')
         .then(results => results.filter(result => result.path.match(/(\.json|\.yaml)$/)))
         .then(results => results.map((result) => {
-            console.log(`    > Reading ${result.path}`);
+            console.log(`${clor.dim(result.path)}`);
 
             return fsp
                 .readFile(result.path, 'utf8')
@@ -169,7 +242,7 @@ function compareRC(readConfig, opt_remoteConfig) {
     const currentContainers = opt_remoteConfig.spec.template.spec.containers.map(c => _.pick(c, containerFields));
 
     if (_.isEqual(newContainers, currentContainers))
-        return { type: Strategies.NONE, config: readConfig };
+        return { type: Strategies.NOOP, config: readConfig };
 
     return { type: Strategies.UPDATE, config: readConfig };
 }
@@ -198,7 +271,7 @@ function compareService(readConfig, opt_remoteConfig) {
 
     if (_.isEqual(newPorts, currentPorts) &&
         (readConfig.spec.selector.name == opt_remoteConfig.spec.selector.name))
-        return { type: Strategies.NONE, config: readConfig };
+        return { type: Strategies.NOOP, config: readConfig };
 
     return { type: Strategies.UPDATE, config: readConfig };
 }
@@ -211,38 +284,29 @@ function compareService(readConfig, opt_remoteConfig) {
  */
 function performRCStrategy(strategy) {
     if (strategy.type == Strategies.CREATE) {
-        console.log(`[rc] ${strategy.config.metadata.name} - CREATE`);
-
-        if (program.dryRun)
-            return Promise.resolve();
-
         return k8s
             .createRC(strategy.config)
             .then((result) => {
-                console.log(`DONE - [rc] ${strategy.config.metadata.name}`);
+                console.log(clor.green(`✓ ${strategy.config.metadata.name}`).string);
             })
             .catch((err) => {
-                console.log(`ERROR - [rc] ${strategy.config.metadata.name}`, err);
+                console.log(clor.red(`✕ ${strategy.config.metadata.name}`).string);
+                console.log(err);
             });
     }
 
     if (strategy.type == Strategies.UPDATE) {
-        console.log(`[rc] ${strategy.config.metadata.name} - UPDATE`);
-
-        if (program.dryRun)
-            return Promise.resolve();
-
         return k8s
                 .updateRC(strategy.config)
                 .then((result) => {
-                    console.log(`DONE - [rc] ${strategy.config.metadata.name}`);
+                    console.log(clor.green(`✓ ${strategy.config.metadata.name}`).string);
                 })
                 .catch((err) => {
-                    console.log(`ERROR - [rc] ${strategy.config.metadata.name}`, err);
+                    console.log(clor.red(`✕ ${strategy.config.metadata.name}`).string);
+                    console.log(err);
                 });
     }
 
-    console.log(`[rc] ${strategy.config.metadata.name} - no change`);
     return Promise.resolve();
 }
 
@@ -254,37 +318,28 @@ function performRCStrategy(strategy) {
  */
 function performServiceStrategy(strategy) {
     if (strategy.type == Strategies.CREATE) {
-        console.log(`[svc] ${strategy.config.metadata.name} - CREATE`);
-
-        if (program.dryRun)
-            return Promise.resolve();
-
         return k8s
             .createService(strategy.config)
             .then((result) => {
-                console.log(`DONE - [svc] ${strategy.config.metadata.name}`);
+                console.log(clor.green(`✓ ${strategy.config.metadata.name}`).string);
             })
             .catch((err) => {
-                console.log(`ERROR - [svc] ${strategy.config.metadata.name}`, err);
+                console.log(clor.red(`✕ ${strategy.config.metadata.name}`).string);
+                console.log(err);
             });
     }
 
     if (strategy.type == Strategies.UPDATE) {
-        console.log(`[svc] ${strategy.config.metadata.name} - UPDATE`);
-
-        if (program.dryRun)
-            return Promise.resolve();
-
         return k8s
                 .updateService(strategy.config)
                 .then((result) => {
-                    console.log(`DONE - [svc] ${strategy.config.metadata.name}`);
+                    console.log(clor.green(`✓ ${strategy.config.metadata.name}`).string);
                 })
                 .catch((err) => {
-                    console.log(`ERROR - [svc] ${strategy.config.metadata.name}`, err);
+                    console.log(clor.red(`✕ ${strategy.config.metadata.name}`).string);
+                    console.log(err);
                 });
     }
 
-    console.log(`[svc] ${strategy.config.metadata.name} - no change`);
     return Promise.resolve();
 }

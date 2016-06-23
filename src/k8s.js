@@ -3,7 +3,6 @@
 const _ = require('lodash');
 const rp = require('request-promise');
 
-const K8S_API_ROOT = `${process.env.K8S_API_ROOT}/api/v1`
 
 
 /**
@@ -13,7 +12,7 @@ const K8S_API_ROOT = `${process.env.K8S_API_ROOT}/api/v1`
 function getRCs() {
     return rp({
             method: 'GET',
-            url: `${K8S_API_ROOT}/replicationcontrollers`,
+            url: `${global.K8S_API_ROOT}/api/v1/replicationcontrollers`,
             json: true
         })
         .then(result => result.items);
@@ -30,7 +29,7 @@ function createRC(config) {
 
     return rp({
         method: 'POST',
-        url: `${K8S_API_ROOT}/namespaces/${namespace}/replicationcontrollers`,
+        url: `${global.K8S_API_ROOT}/api/v1/namespaces/${namespace}/replicationcontrollers`,
         json: true,
         body: config
     });
@@ -61,7 +60,7 @@ function updateRC_(config) {
 
     return rp({
         method: 'PUT',
-        url: `${K8S_API_ROOT}/namespaces/${namespace}/replicationcontrollers/${name}`,
+        url: `${global.K8S_API_ROOT}/api/v1/namespaces/${namespace}/replicationcontrollers/${name}`,
         json: true,
         body: config
     });
@@ -95,7 +94,7 @@ function deleteRC(config) {
     return scaleRC(config, 0)
         .then(_ => rp({
             method: 'DELETE',
-            url: `${K8S_API_ROOT}/namespaces/${namespace}/replicationcontrollers/${name}`,
+            url: `${global.K8S_API_ROOT}/api/v1/namespaces/${namespace}/replicationcontrollers/${name}`,
             json: true
         }));
 }
@@ -108,7 +107,7 @@ function deleteRC(config) {
 function getServices() {
     return rp({
             method: 'GET',
-            url: `${K8S_API_ROOT}/services`,
+            url: `${global.K8S_API_ROOT}/api/v1/services`,
             json: true
         })
         .then(result => result.items);
@@ -125,7 +124,7 @@ function createService(config) {
 
     return rp({
         method: 'POST',
-        url: `${K8S_API_ROOT}/namespaces/${namespace}/services`,
+        url: `${global.K8S_API_ROOT}/api/v1/namespaces/${namespace}/services`,
         json: true,
         body: config
     });
@@ -155,7 +154,7 @@ function deleteService(config) {
 
     return rp({
         method: 'DELETE',
-        url: `${K8S_API_ROOT}/namespaces/${namespace}/services/${name}`,
+        url: `${global.K8S_API_ROOT}/api/v1/namespaces/${namespace}/services/${name}`,
         json: true
     });
 }
