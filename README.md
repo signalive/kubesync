@@ -29,10 +29,10 @@ Usage: kubesync <folder> [options]
 
 Options:
 
-  -h, --help                     output usage information
-  -V, --version                  output the version number
-  -d, --dry-run                  run the script without any changes on remote k8s for test purposes
-  -e, --ensure-all-pods-running  watch pods after execution and ensure all of them in `running` state
+  -h, --help                   output usage information
+  -V, --version                output the version number
+  -d, --dry-run                run the script without any changes on remote k8s for test purposes
+  -e, --ensure-all-running     watch related pods after execution and wait until they're in `running` state
 ```
 
 ## Example

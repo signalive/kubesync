@@ -51,7 +51,7 @@ program
     .version(require('../package.json').version)
     .usage('<folder> [options]')
     .option('-d, --dry-run', 'run the script without any changes on remote k8s for test purposes')
-    .option('-e, --ensure-all-pods-running', 'watch pods after execution and ensure all of them in `running` state')
+    .option('-e, --ensure-all-running', 'watch related pods after execution and wait until they\'re in `running` state')
     .action((folder) => {
         init(folder);
     })
@@ -74,6 +74,7 @@ function init(folder) {
     };
 
     let results = [];
+    let configs = null;
 
     Promise.all([
             k8s.getRCs(),
@@ -85,7 +86,8 @@ function init(folder) {
             console.log(clor.dim(`Fetched ${results[0].length} replication controllers and ${results[1].length} services`).string);
             return readConfigFiles(folder);
         })
-        .then((configs) => {
+        .then((configs_) => {
+            configs = configs_;
             console.log(`\n${clor.bold('=> Determining strategies...')}`);
 
             const fetchedRCs = _.keyBy(results[0], 'metadata.name');
@@ -153,11 +155,11 @@ function init(folder) {
             return Promise.all(tasks);
         })
         .then(() => {
-            if (!program.ensureAllPodsRunning)
+            if (!program.ensureAllRunning)
                 return;
 
-            console.log('\n' + clor.bold('=> Ensuring all the pods are running state...'));
-            return ensureAllPodsRunning();
+            console.log('\n' + clor.bold('=> Ensuring all the related pods are running state...'));
+            return ensureAllRunning(configs);
         })
         .then(() => {
             console.log('\n' + clor.bold('=> Done'));
@@ -358,9 +360,16 @@ function performServiceStrategy(strategy) {
 
 /**
  * Ensures all the pods are in `running` state.
+ * @param {Object} configs Read configurations
  * @return {Promise}
  */
-function ensureAllPodsRunning() {
+function ensureAllRunning(configs) {
+    if (!_.isObject(configs))
+        return Promise.reject(new Error(`No configuration provided, could not ensure`));
+
+    if (!_.isArray(configs.ReplicationController) || configs.ReplicationController.length == 0)
+        return Promise.reject(new Error(`There is no read rc configuration, could not ensure`));
+
     if (ensureRetryCount == global.ENSURE_MAX_RETRY_COUNT)
         return Promise.reject(new Error(`Ensure failed, max retry count reached`));
 
@@ -369,15 +378,39 @@ function ensureAllPodsRunning() {
     return k8s
         .getPods()
         .then((pods) => {
-            const podsInRunningState = pods.filter(pod => pod.status.phase == 'Running');
-            console.log(clor.dim(`${podsInRunningState.length} of ${pods.length} pods are in running state`).string);
+            const podCountByRC = {};
+            let totalDesiredCount = 0;
+            let totalRunningCount = 0;
 
-            if (podsInRunningState.length == pods.length)
+            configs.ReplicationController.forEach((rc) => {
+                const matches = pods.filter((pod) => {
+                    if (pod.status.phase != 'Running')
+                        return false;
+
+                    return _.isMatch(pod.metadata.labels, rc.spec.template.metadata.labels);
+                });
+
+                totalDesiredCount += rc.spec.replicas;
+                totalRunningCount += matches.length;
+
+                podCountByRC[rc.metadata.name] = {
+                    running: matches.length,
+                    desired: rc.spec.replicas
+                };
+            });
+
+            // _.forEach(podCountByRC, (count, name) => {
+            //     console.log(clor.dim(`${name}: ${count.running}/${count.desired}`).string);
+            // });
+
+            console.log(clor.dim(`Running: ${totalRunningCount} / Desired: ${totalDesiredCount}`).string);
+
+            if (totalRunningCount == totalDesiredCount)
                 return;
 
             return new Promise((resolve) => {
                 setTimeout(() => {
-                    resolve(ensureAllPodsRunning());
+                    resolve(ensureAllRunning(configs));
                 }, global.ENSURE_RETRY_INTERVAL);
             });
         });
