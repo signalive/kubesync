@@ -159,7 +159,11 @@ function init(folder) {
                 return;
 
             console.log('\n' + clor.bold('=> Ensuring all the related pods are running state...'));
-            return ensureAllRunning(configs);
+            return new Promise((resolve) => {
+                setTimeout(() => {
+                    resolve(ensureAllRunning(configs));
+                }, 5000);
+            });
         })
         .then(() => {
             console.log('\n' + clor.bold('=> Done'));
