@@ -159,11 +159,7 @@ function init(folder) {
                 return;
 
             console.log('\n' + clor.bold('=> Ensuring all the related pods are running state...'));
-            return new Promise((resolve) => {
-                setTimeout(() => {
-                    resolve(ensureAllRunning(configs));
-                }, 5000);
-            });
+            return ensureAllRunning(configs);
         })
         .then(() => {
             console.log('\n' + clor.bold('=> Done'));
@@ -388,6 +384,9 @@ function ensureAllRunning(configs) {
 
             configs.ReplicationController.forEach((rc) => {
                 const matches = pods.filter((pod) => {
+                    if (pod.metadata.deletionTimestamp)
+                        return false;
+
                     if (pod.status.phase != 'Running')
                         return false;
 
